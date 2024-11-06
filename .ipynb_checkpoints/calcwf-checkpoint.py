@@ -711,8 +711,6 @@ def overlap_cplx_wfs(wf1, wf2, f_low, f_match=20, normalized=True):
 
     return m
 
-## Maximising over shifted frequency
-
 def minimise_match(s_f, f_low, e, M, q, h_fid, sample_rate, approximant, subsample_interpolation):
     """
     Calculates match to fiducial waveform for a given shifted frequency.
@@ -742,6 +740,8 @@ def minimise_match(s_f, f_low, e, M, q, h_fid, sample_rate, approximant, subsamp
     m = match_wfs(trial_wf, h_fid, s_f[0], subsample_interpolation)
 
     return m
+
+## Maximising over shifted frequency
 
 def sine_model_coeffs(m_0, m_1, m_2):
     """
