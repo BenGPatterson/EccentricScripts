@@ -172,7 +172,7 @@ def modes_to_k(modes):
     
     return [int(x[0]*(x[0]-1)/2 + x[1]-2) for x in modes]
 
-def gen_teob_wf(f, e, M, q, sample_rate, phase, distance, TA, inclination, freq_type, mode_list):
+def gen_teob_wf(f, e, M, q, chi1, chi2, sample_rate, phase, distance, TA, inclination, freq_type, mode_list):
     """
     Generates TEOBResumS waveform with chosen parameters.
 
@@ -181,6 +181,8 @@ def gen_teob_wf(f, e, M, q, sample_rate, phase, distance, TA, inclination, freq_
         e: Eccentricity.
         M: Total mass.
         q: Mass ratio.
+        chi1: Aligned spin of primary.
+        chi2: Aligned spin of secondary.
         sample_rate: Sampling rate of waveform to be generated.
         phase: Phase of signal.
         distance: Luminosity distance to binary in Mpc.
@@ -208,8 +210,8 @@ def gen_teob_wf(f, e, M, q, sample_rate, phase, distance, TA, inclination, freq_
     pars = {
             'M'                  : M,
             'q'                  : q,    
-            'chi1'               : 0,
-            'chi2'               : 0,
+            'chi1'               : chi1,
+            'chi2'               : chi2,
             'domain'             : 0,            # TD
             'arg_out'            : 'no',         # Output hlm/hflm. Default = 0
             'use_mode_lm'        : k,            # List of modes to use/output through EOBRunPy
@@ -237,7 +239,7 @@ def gen_teob_wf(f, e, M, q, sample_rate, phase, distance, TA, inclination, freq_
     
     return teob_p, teob_c
 
-def gen_wf(f_low, e, M, q, sample_rate, approximant, phase=0, distance=1, TA=np.pi, inclination=0, freq_type='average', mode_list=[[2,2]]):
+def gen_wf(f_low, e, M, q, sample_rate, approximant, chi1=0, chi2=0, phase=0, distance=1, TA=np.pi, inclination=0, freq_type='average', mode_list=[[2,2]]):
     """
     Generates waveform with chosen parameters.
 
@@ -248,6 +250,8 @@ def gen_wf(f_low, e, M, q, sample_rate, approximant, phase=0, distance=1, TA=np.
         q: Mass ratio.
         sample_rate: Sampling rate of waveform to be generated.
         approximant: Approximant to use to generate the waveform.
+        chi1: Aligned spin of primary.
+        chi2: Aligned spin of secondary.
         phase: Phase of signal.
         distance: Luminosity distance to binary in Mpc.
         TA: Initial true anomaly.
@@ -261,7 +265,7 @@ def gen_wf(f_low, e, M, q, sample_rate, approximant, phase=0, distance=1, TA=np.
 
     # Chooses specified approximant
     if approximant=='TEOBResumS':
-        hp, hc = gen_teob_wf(f_low, e, M, q, sample_rate, phase, distance, TA, inclination, freq_type, mode_list)
+        hp, hc = gen_teob_wf(f_low, e, M, q, chi1, chi2, sample_rate, phase, distance, TA, inclination, freq_type, mode_list)
     else:
         raise Exception('approximant not recognised')
 
