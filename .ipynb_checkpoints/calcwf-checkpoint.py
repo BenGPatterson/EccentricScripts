@@ -1042,7 +1042,7 @@ def taper_wf(wf_taper):
 
     return wf_taper
 
-def get_comp_shifts(f_low, e, M, q, n):
+def get_comp_shifts(f_low, e, M, q, n, sample_rate, approximant, h, regen_shift=True):
     '''
     Calculates shifted frequency and eccentricity required to create each component
     waveform (beyond first).
@@ -1053,19 +1053,37 @@ def get_comp_shifts(f_low, e, M, q, n):
         M: Total mass.
         q: Mass ratio.
         n: Number of waveform components.
+        sample_rate: Sample rate of waveform.
+        approximant: Approximant to use.
+        h: First unshifted waveform.
 
     Returns:
         Shifted frequency and eccentricity for all components beyond first.
     '''
 
-    # Finds shifted frequency and eccentricity without correction
-    max_s_f = shifted_f(f_low, e, M, q)
+    s_f = shifted_f(f_low, e, M, q)
+    if regen_shift:
+        
+        # Generate trial waveform shifted back by best estimate of 2pi in mean anomaly
+        s_e = shifted_e(s_f, f_low, e)
+        s_wf = gen_wf(s_f, s_e, M, q, sample_rate, approximant)
+    
+        # Find peaks of trial and unshifted waveform to work out real shift required
+        orig_peaks = h.sample_times[1:-1][np.diff(np.sign(np.diff(np.abs(h))))<0]
+        s_peaks = s_wf.sample_times[1:-1][np.diff(np.sign(np.diff(np.abs(s_wf))))<0]
+        s_factor = 1/(1+(orig_peaks[0] - s_peaks[1])/(orig_peaks[1] - orig_peaks[0]))
+
+    else:
+        s_factor = 1
+
+    # Finds shifted frequency and eccentricity of shifted waveforms
+    max_s_f = f_low - (f_low - s_f)*s_factor
     s_f_vals = np.linspace(f_low, max_s_f, n, endpoint=False)[1:]
     s_e_vals = shifted_e(s_f_vals, f_low, e)
 
     return s_f_vals, s_e_vals
 
-def gen_component_wfs(f_low, e, M, q, n, sample_rate, approximant, normalisation, phase, f_match):
+def gen_component_wfs(f_low, e, M, q, n, sample_rate, approximant, regen_shift, normalisation, phase, f_match):
     '''
     Creates n component waveforms used to make harmonics, all equally spaced in
     mean anomaly at a fixed time before merger.
@@ -1078,6 +1096,7 @@ def gen_component_wfs(f_low, e, M, q, n, sample_rate, approximant, normalisation
         n: Number of waveform components.
         sample_rate: Sample rate of waveform.
         approximant: Approximant to use.
+        regen_shift: Whether to find more exact initial frequencies and eccentricities using a trial waveform call.
         normalisation: Whether to normalise x_0,...,x_n-1 components to ensure (x_j|x_j) is constant.
         phase: Initial phase of x_0,...,x_n-1 components.
         f_match: Low frequency cutoff to use.
@@ -1088,7 +1107,7 @@ def gen_component_wfs(f_low, e, M, q, n, sample_rate, approximant, normalisation
 
     # Generates first (unshifted) component waveform and shifts required for others
     h = gen_wf(f_low, e, M, q, sample_rate, approximant, phase=phase)
-    s_f_vals, s_e_vals = get_comp_shifts(f_low, e, M, q, n)
+    s_f_vals, s_e_vals = get_comp_shifts(f_low, e, M, q, n, sample_rate, approximant, h, regen_shift=regen_shift)
 
     # Tapers first waveform
     h = taper_wf(h)
@@ -1286,7 +1305,7 @@ def get_h_TD(f_low, coeffs, comp_wfs, GS_normalisation, f_match, return_ovlps=Fa
     # Returns overall waveform and components for testing purposes
     return [h, *hs, *comp_wfs], ovlps, ovlps_perp
 
-def get_h(coeffs, f_low, e, M, q, sample_rate, approximant='TEOBResumS', f_match=20, subsample_interpolation=True, GS_normalisation=True, comp_normalisation=False, comp_phase=0, return_ovlps=False):
+def get_h(coeffs, f_low, e, M, q, sample_rate, approximant='TEOBResumS', f_match=20, subsample_interpolation=True, GS_normalisation=True, regen_shift=True, comp_normalisation=False, comp_phase=0, return_ovlps=False):
     """
     Generates a overall h waveform, harmonic waveforms, and component waveforms.
 
@@ -1301,6 +1320,7 @@ def get_h(coeffs, f_low, e, M, q, sample_rate, approximant='TEOBResumS', f_match
         f_match: Low frequency cutoff to use.
         subsample_interpolation: Whether to use subsample interpolation.
         GS_normalisation: Whether to perform Grant-Schmidt orthogonalisaton to ensure (hj|hm) = 0 for j!=m.
+        regen_shift: Whether to find more exact initial frequencies and eccentricities of component waveforms using a trial waveform call.
         comp_normalisation: Whether to normalise x_0,...,x_n-1 components to ensure (sj|sj) is constant.
         comp_phase: Initial phase of x_0,...,x_n-1 components.
         return_ovlps: Whether to return overlaps between all unorthogonalised harmonics.
@@ -1313,7 +1333,7 @@ def get_h(coeffs, f_low, e, M, q, sample_rate, approximant='TEOBResumS', f_match
     assert approximant == 'TEOBResumS'
 
     # Gets (normalised) components which make up overall waveform
-    component_wfs = gen_component_wfs(f_low, e, M, q, len(coeffs), sample_rate, approximant, comp_normalisation, comp_phase, f_match)
+    component_wfs = gen_component_wfs(f_low, e, M, q, len(coeffs), sample_rate, approximant, regen_shift, comp_normalisation, comp_phase, f_match)
 
     # Calculate overall waveform and components in time domain
     wfs, ovlps, ovlps_perp = get_h_TD(f_low, coeffs, component_wfs, GS_normalisation, f_match, return_ovlps=return_ovlps)
