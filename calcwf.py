@@ -1062,16 +1062,19 @@ def get_comp_shifts(f_low, e, M, q, n, sample_rate, approximant, h, regen_shift=
     '''
 
     s_f = shifted_f(f_low, e, M, q)
-    if regen_shift:
-        
+    if regen_shift and e > 0:
+
         # Generate trial waveform shifted back by best estimate of 2pi in mean anomaly
         s_e = shifted_e(s_f, f_low, e)
         s_wf = gen_wf(s_f, s_e, M, q, sample_rate, approximant)
-    
+
         # Find peaks of trial and unshifted waveform to work out real shift required
         orig_peaks = h.sample_times[1:-1][np.diff(np.sign(np.diff(np.abs(h))))<0]
         s_peaks = s_wf.sample_times[1:-1][np.diff(np.sign(np.diff(np.abs(s_wf))))<0]
-        s_factor = 1/(1+(orig_peaks[0] - s_peaks[1])/(orig_peaks[1] - orig_peaks[0]))
+        if len(orig_peaks) >= 2 and len(orig_peaks) >= 2:
+            s_factor = 1/(1+(orig_peaks[0] - s_peaks[1])/(orig_peaks[1] - orig_peaks[0]))
+        else:
+            s_factor = 1
 
     else:
         s_factor = 1
