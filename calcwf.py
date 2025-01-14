@@ -1071,7 +1071,7 @@ def get_comp_shifts(f_low, e, M, q, n, sample_rate, approximant, h, regen_shift=
         # Find peaks of trial and unshifted waveform to work out real shift required
         orig_peaks = h.sample_times[1:-1][np.diff(np.sign(np.diff(np.abs(h))))<0]
         s_peaks = s_wf.sample_times[1:-1][np.diff(np.sign(np.diff(np.abs(s_wf))))<0]
-        if len(orig_peaks) >= 2 and len(orig_peaks) >= 2:
+        if len(orig_peaks) >= 2 and len(s_peaks) >= 2:
             s_factor = 1/(1+(orig_peaks[0] - s_peaks[1])/(orig_peaks[1] - orig_peaks[0]))
         else:
             s_factor = 1
