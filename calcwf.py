@@ -579,37 +579,32 @@ def match_hn(wf_hjs_, wf_s, f_low, f_match=20, return_index=False, psd=None):
     wf_s = all_wfs[-1]
     wf_len = len(wf_s)
 
+    plt.plot(wf_hjs[0].sample_times, wf_hjs[0])
+    plt.plot(wf_s.sample_times, wf_s)
+    plt.show()
+
     # Perform match on dominant
     m_h1_amp, m_index, m_h1_phase = match(wf_hjs[0].real(), wf_s.real(), psd=psd, low_frequency_cutoff=f_match, subsample_interpolation=True, return_phase=True)
     m_h1 = m_h1_amp*np.e**(1j*m_h1_phase)
 
-    # Shift sub-dominant
+    # If sub-dominant needs to be shifted forward, then do so
+    print(len(wf_hjs[0]), len(wf_s))
     if m_index <= len(wf_hjs[0])/2:
-        # If sub-dominant needs to be shifted forward, prepend zeros to it
+        print('shift wf hjs by '+str(m_index))
         for i in range(1,len(wf_hjs)):
-            wf_hjs[i].prepend_zeros(int(m_index))
+            wf_hjs[i] = wf_hjs[i].real().cyclic_time_shift(m_index/wf_hjs[i].sample_rate) + 1j*wf_hjs[i].imag().cyclic_time_shift(m_index/wf_hjs[i].sample_rate)
             wf_hjs[i].resize(wf_len)
+    # If sub-dominant needs to be shifted backward, shift trial waveform forward instead
     else:
-        # If sub-dominant needs to be shifted backward, prepend zeros to trial waveform instead
-        wf_s.prepend_zeros(int(len(wf_hjs[0]) - m_index))
+        print('shift wf s by '+str(len(wf_hjs[0]) - m_index))
+        plt.plot(wf_hjs[0].sample_times, wf_hjs[0])
+        plt.plot(wf_s.sample_times, wf_s)
+        plt.show()
+        wf_s = wf_s.real().cyclic_time_shift((len(wf_hjs[0]) - m_index)/wf_s.sample_rate) + 1j*wf_s.imag().cyclic_time_shift((len(wf_hjs[0]) - m_index)/wf_s.sample_rate)
         wf_s.resize(wf_len)
-
-    # As subsample_interpolation=True, require interpolation of sub-dominant to account for non-integer index shift
-    delta_t = wf_hjs[0].delta_t
-    if m_index <= len(wf_hjs[0])/2:
-        # If sub-dominant needs to be shifted forward, interpolate sub-dominant forward
-        inter_index = m_index - int(m_index)
-        for i in range(1,len(wf_hjs)):
-            wf_hj_interpolate = interp1d(wf_hjs[i].sample_times, wf_hjs[i], bounds_error=False, fill_value=0)
-            wf_hj_strain = wf_hj_interpolate(wf_hjs[i].sample_times-(inter_index*delta_t))
-            wf_hjs[i] = timeseries.TimeSeries(wf_hj_strain, wf_hjs[i].delta_t, epoch=wf_hjs[i].start_time-(inter_index*delta_t))
-    else:
-        # If sub-dominant needs to be shifted backward, interpolate sub-dominant backward
-        inter_index = (len(wf_hjs[0]) - m_index) - int(len(wf_hjs[0]) - m_index)
-        for i in range(1,len(wf_hjs)):
-            wf_hj_interpolate = interp1d(wf_hjs[i].sample_times, wf_hjs[i], bounds_error=False, fill_value=0)
-            wf_hj_strain = wf_hj_interpolate(wf_hjs[i].sample_times+(inter_index*delta_t))
-            wf_hjs[i] = timeseries.TimeSeries(wf_hj_strain, wf_hjs[i].delta_t, epoch=wf_hjs[i].start_time+(inter_index*delta_t))
+        plt.plot(wf_hjs[0].sample_times, wf_hjs[0])
+        plt.plot(wf_s.sample_times, wf_s)
+        plt.show()
 
     # Perform complex overlap on sub-dominant
     matches = [m_h1]
