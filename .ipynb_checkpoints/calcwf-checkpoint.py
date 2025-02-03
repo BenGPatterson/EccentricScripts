@@ -579,10 +579,6 @@ def match_hn(wf_hjs_, wf_s, f_low, f_match=20, return_index=False, psd=None):
     wf_s = all_wfs[-1]
     wf_len = len(wf_s)
 
-    plt.plot(wf_hjs[0].sample_times, wf_hjs[0])
-    plt.plot(wf_s.sample_times, wf_s)
-    plt.show()
-
     # Perform match on dominant
     m_h1_amp, m_index, m_h1_phase = match(wf_hjs[0].real(), wf_s.real(), psd=psd, low_frequency_cutoff=f_match, subsample_interpolation=True, return_phase=True)
     m_h1 = m_h1_amp*np.e**(1j*m_h1_phase)
