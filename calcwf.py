@@ -221,7 +221,6 @@ def gen_teob_wf(f, e, M, q, chi1, chi2, sample_rate, phase, distance, TA, inclin
             'interp_uniform_grid': 'yes',        # Interpolate mode by mode on a uniform grid. Default = 0 (no interpolation)
             'distance'           : distance,
             'coalescence_angle'  : phase,
-            'inclination'        : 0,
             'ecc'                : e,
             'output_hpc'         : 'no',
             'ecc_freq'           : freq_type_id,
