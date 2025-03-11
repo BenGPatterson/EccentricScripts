@@ -74,56 +74,6 @@ def comb_harm_consistent(abs_SNRs, ang_SNRs, harms=[0,1,-1]):
     
     return higher_SNR/abs_SNRs[0]
 
-def find_min_max(data, extra_keys=['h1_h0', 'h-1_h0', 'h2_h0', 'h1_h-1_h0', 'h1_h-1_h0_pca'], ovlps=None):
-    """
-    Finds minimum and maximum match of various match quantities across varying mean anomaly.
-
-    Parameters:
-        data: Dictionary containing matches.
-        extra_keys: Extra match-related quantities to compute.
-        ovlps: Optionally use overlaps between harmonics to improve SNR estimate.
-
-    Returns:
-        data: Dictionary containing matches with min/max matches added.
-    """
-
-    # Loop over each chirp mass grid
-    for chirp in data.keys():
-
-        # Calculate extra keys if not already present
-        for key in extra_keys:
-            if key not in list(data[chirp].keys()):
-                if key == 'h1_h0':
-                    data[chirp]['h1_h0'] = data[chirp]['h1']/data[chirp]['h0']
-                elif key == 'h-1_h0':
-                    data[chirp]['h-1_h0'] = data[chirp]['h-1']/data[chirp]['h0']
-                elif key == 'h2_h0':
-                    data[chirp]['h2_h0'] = data[chirp]['h2']/data[chirp]['h0']
-                elif key == 'h1_h-1_h0':
-                    num = np.sqrt(data[chirp]['h1']**2+data[chirp]['h-1']**2)
-                    data[chirp]['h1_h-1_h0'] = num/data[chirp]['h0']
-                elif key == 'h1_h-1_h2_h0':
-                    num = np.sqrt(data[chirp]['h1']**2+data[chirp]['h-1']**2+data[chirp]['h2']**2)
-                    data[chirp]['h1_h-1_h2_h0'] = num/data[chirp]['h0']
-                elif key == 'h1_h-1_h0_pca':
-                    angle = 2*data[chirp]['h0_phase']-data[chirp]['h1_phase']-data[chirp]['h-1_phase']
-                    num = np.sqrt(data[chirp]['h1']**2+np.cos(angle)*data[chirp]['h-1']**2)
-                    data[chirp]['h1_h-1_h0_pca'] = num/data[chirp]['h0']
-                elif key == 'h1_h-1_h0_pcn':
-                    data[chirp]['h1_h-1_h0_pcn'] = comb_harm_consistent_grid(data[chirp], harms=[1,-1])
-                elif key == 'h1_h-1_h2_h0_pcn':
-                    data[chirp]['h1_h-1_h2_h0_pcn'] = comb_harm_consistent_grid(data[chirp], harms=[1,-1,2])
-                
-        # Calculate min and max of each key
-        for key in list(data[chirp].keys()):
-            
-            # Find min/max vals and add to grid
-            if key[0] == 'h' or key=='quad':
-                data[chirp][f'{key}_max'] = np.nanmax(np.array(data[chirp][key]), axis=1)
-                data[chirp][f'{key}_min'] = np.nanmin(np.array(data[chirp][key]), axis=1)
-
-    return data
-
 def create_min_max_interp(data, chirp, key):
     """
     Create interpolation objects which give the min and max ecc value for 
@@ -381,7 +331,7 @@ def SNR_samples(obs_SNR, df, n, bound_tol=10**-3):
     proposals = np.linspace(0, upper_bound, n)
     weights = calc_weights(proposals, obs_SNR, df)/max_weight
 
-    # Accept or reject weights according to weights
+    # Accept or reject samples according to weights
     accepts = np.random.uniform(size=n)
     samples = proposals[weights>=accepts]
 

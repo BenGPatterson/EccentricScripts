@@ -331,7 +331,7 @@ def SNR_samples(obs_SNR, df, n, bound_tol=10**-3):
     proposals = np.linspace(0, upper_bound, n)
     weights = calc_weights(proposals, obs_SNR, df)/max_weight
 
-    # Accept or reject weights according to weights
+    # Accept or reject samples according to weights
     accepts = np.random.uniform(size=n)
     samples = proposals[weights>=accepts]
 
