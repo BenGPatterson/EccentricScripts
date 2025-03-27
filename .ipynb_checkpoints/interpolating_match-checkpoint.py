@@ -40,8 +40,7 @@ def estimate_coeffs(rhos, ovlps, ovlps_perp):
 
 def comb_harm_consistent(abs_SNRs, ang_SNRs, harms=[0,1,-1]):
     """
-    Combine match of higher harmonics in phase consistent way for 
-    a single point.
+    Combine match of higher harmonics in phase consistent way.
 
     Parameters:
         abs_SNRs: Magnitudes of matches with each harmonic.
@@ -49,30 +48,63 @@ def comb_harm_consistent(abs_SNRs, ang_SNRs, harms=[0,1,-1]):
         harms: Which harmonics to include.
 
     Returns:
-        frac: Combined match relative to fundamental SNR.
+        SNR_fracs: Combined match relative to fundamental SNR.
+        MAs: Combined measurement of mean anomaly at merger.
     """
 
     # Only works for 0,1,-1 harmonics
     assert set(harms) == set([0,1,-1])
 
+    # Check if inputs are arrays
+    array = False
+    if len(np.shape(abs_SNRs[0])) > 0:
+        array = True
+
     # Sort harmonics to 0,1,-1 ordering
-    harm_ids = [harms.index(x) for x in [0,1,-1]]
-    abs_SNRs = [abs_SNRs[x] for x in harm_ids]
-    ang_SNRs = [ang_SNRs[x] for x in harm_ids]
+    harm_ids = np.array([harms.index(x) for x in [0,1,-1]])
+    abs_SNRs = np.array([np.array([abs_SNRs[x]]).flatten() for x in harm_ids])
+    ang_SNRs = np.array([np.array([ang_SNRs[x]]).flatten() for x in harm_ids])
 
     # Check if inconsistent by more than pi/2 radians
-    angle_arg = 2*ang_SNRs[0]-ang_SNRs[1]-ang_SNRs[2]
-    condition = np.abs(angle_arg - np.round(angle_arg/(2*np.pi),0)*2*np.pi) <= np.pi/2
+    angle_arg = 2*ang_SNRs[0]-ang_SNRs[1]-ang_SNRs[-1]
+    condition = np.where(np.abs(angle_arg - np.round(angle_arg/(2*np.pi),0)*2*np.pi) <= np.pi/2)
+    mask = np.zeros_like(abs_SNRs[0], bool)
+    mask[condition] = True
 
     # Calculate SNR in higher harmonics
-    if condition:
-        cross_term_sqrd = abs_SNRs[1]**4 + 2*abs_SNRs[1]**2*abs_SNRs[-1]**2*np.cos(2*angle_arg) + abs_SNRs[-1]**4
-        log_L = (1/4)*(abs_SNRs[1]**2+abs_SNRs[-1]**2+np.sqrt(cross_term_sqrd))
-    else:
-        log_L = (1/2)*np.max([abs_SNRs[1]**2, abs_SNRs[-1]**2])
-    higher_SNR = np.sqrt(2*log_L)
+    log_Ls = np.ones_like(abs_SNRs[0], float)
+    MAs = np.ones_like(abs_SNRs[0], float)
+
+    # SNR, log_L
+    cross_term_sqrd = abs_SNRs[1][mask]**4 + 2*abs_SNRs[1][mask]**2*abs_SNRs[-1][mask]**2*np.cos(2*angle_arg[mask]) + abs_SNRs[-1][mask]**4
+    log_L = (1/4)*(abs_SNRs[1][mask]**2+abs_SNRs[-1][mask]**2+np.sqrt(cross_term_sqrd))
+    log_Ls[mask] = log_L
+    log_L = (1/2)*np.max([abs_SNRs[1][~mask]**2, abs_SNRs[-1][~mask]**2], axis=0)
+    log_Ls[~mask] = log_L
+    SNR_fracs = np.sqrt(2*log_Ls)/abs_SNRs[0]
+
+    # Phase
+    sin_num = abs_SNRs[-1][mask]**2*np.sin(2*(ang_SNRs[0][mask]-ang_SNRs[-1][mask])) - abs_SNRs[1][mask]**2*np.sin(2*(ang_SNRs[0][mask] - ang_SNRs[1][mask]))
+    cos_denom = abs_SNRs[1][mask]**2*np.cos(2*(ang_SNRs[0][mask]-ang_SNRs[1][mask])) + abs_SNRs[-1][mask]**2*np.cos(2*(ang_SNRs[0][mask] - ang_SNRs[-1][mask]))
+    MA = np.arctan2(sin_num, cos_denom)/2
+    amp_check_1 = np.cos(MA + ang_SNRs[0][mask] - ang_SNRs[1][mask]) < 0
+    amp_check_n1 = np.cos(-MA + ang_SNRs[0][mask] - ang_SNRs[-1][mask]) < 0
+    MA[np.where(amp_check_1 + amp_check_n1)[0]] += np.pi
+    MA = np.mod(MA, 2*np.pi)
+    MAs[mask] = MA
+    if np.sum(~mask)>0:
+        argmaxs = np.argmax([abs_SNRs[1][~mask]**2, abs_SNRs[-1][~mask]**2], axis=0)+1
+        phi = ang_SNRs.T[~mask][np.arange(np.sum(~mask)), argmaxs]
+        harm_id = np.array([0,1,-1])[argmaxs]
+        MA = (phi - ang_SNRs[0][~mask])/harm_id
+        MAs[~mask] = MA
+
+    # Convert back to floats if original was not array
+    if not array:
+        SNR_fracs = SNR_fracs[0]
+        MAs = MAs[0]
     
-    return higher_SNR/abs_SNRs[0]
+    return SNR_fracs, MAs
 
 def create_min_max_interp(data, chirp, key):
     """
