@@ -97,6 +97,7 @@ def comb_harm_consistent(abs_SNRs, ang_SNRs, harms=[0,1,-1]):
         phi = ang_SNRs.T[~mask][np.arange(np.sum(~mask)), argmaxs]
         harm_id = np.array([0,1,-1])[argmaxs]
         MA = (phi - ang_SNRs[0][~mask])/harm_id
+        MA = np.mod(MA, 2*np.pi)
         MAs[~mask] = MA
 
     # Convert back to floats if original was not array
