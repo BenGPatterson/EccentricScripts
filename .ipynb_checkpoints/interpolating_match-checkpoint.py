@@ -1,9 +1,9 @@
 import itertools
 import time
 import numpy as np
-from scipy.interpolate import interp1d, LinearNDInterpolator
+from scipy.interpolate import griddata, interp1d, LinearNDInterpolator
 from scipy.optimize import curve_fit, minimize
-from scipy.stats import ncx2, sampling, gaussian_kde
+from scipy.stats import ncx2, sampling, gaussian_kde, multivariate_normal
 from pycbc.filter import match, optimized_match, sigma
 from pycbc.noise import frequency_noise_from_psd
 from calcwf import chirp2total, chirp_degeneracy_line, gen_wf, shifted_f, shifted_e, gen_psd, resize_wfs, get_h
@@ -21,7 +21,7 @@ def estimate_coeffs(rhos, ovlps, ovlps_perp):
 
     Returns:
         est_coeffs: Coefficient estimates.
-    """  
+    """
     n = len(rhos)
     adjust = {}
     est_coeffs = {}
@@ -104,7 +104,7 @@ def comb_harm_consistent(abs_SNRs, ang_SNRs, harms=[0,1,-1]):
     if not array:
         SNR_fracs = SNR_fracs[0]
         MAs = MAs[0]
-    
+
     return SNR_fracs, MAs
 
 def create_map(match_grid, two_ecc_harms=True, map_len=151):
@@ -121,7 +121,7 @@ def create_map(match_grid, two_ecc_harms=True, map_len=151):
         map_e: Eccentricity mapping array.
         map_MA: MA mapping array.
         map_SNR: SNR mapping array.
-    """ 
+    """
 
     # Get sparse mapping points
     e_vals = match_grid['metadata']['degen_params']['ecc10']
@@ -134,7 +134,7 @@ def create_map(match_grid, two_ecc_harms=True, map_len=151):
         sparse_SNR = np.tile(match_grid['h1_h0'].flatten(), 3)
         MA_merger = (match_grid['h1_phase']-match_grid['h0_phase']).flatten()%(2*np.pi)
     sparse_MA = np.concatenate((MA_merger-2*np.pi, MA_merger, MA_merger+2*np.pi))
-    
+
     # Get dense mapping points
     map_e = np.tile(np.linspace(np.min(e_vals), np.max(e_vals), map_len), map_len)
     map_MA = np.repeat(np.linspace(0, 2*np.pi, map_len), map_len)
@@ -156,7 +156,7 @@ def SNR_weights(harm_SNRs, prior_MA, prior_SNR, two_ecc_harms=True):
         weights: Weight of each prior sample.
         likeL_MA: MA of likelihood samples.
         likeL_SNR: SNR of likelihood samples.
-    """ 
+    """
 
     # Convert prior samples to x and y coordinates
     prior_x = np.real(prior_SNR*np.exp(1j*prior_MA))
@@ -183,7 +183,7 @@ def SNR_weights(harm_SNRs, prior_MA, prior_SNR, two_ecc_harms=True):
         kde_x, kde_y = np.mgrid[np.min(s_1n1_x):np.max(s_1n1_x):51j, np.min(s_1n1_y):np.max(s_1n1_y):51j]
         kde_z = kernel(np.vstack([kde_x.flatten(), kde_y.flatten()])).reshape(kde_x.shape)
         weights = griddata((kde_x.flatten(), kde_y.flatten()), kde_z.flatten(), (prior_x.flatten(), prior_y.flatten()), method='linear', fill_value=0)
-        
+
     else:
 
         # If only first higher harmonic, weights drawn from gaussian pdf
@@ -217,7 +217,7 @@ def get_param_samples(harm_SNRs, prior_e, prior_MA, map_e, map_MA, map_SNR, two_
 
     Returns:
         param_samples: Dictionary with sample information.
-    """ 
+    """
 
     # Convert prior samples to SNR space
     prior_SNR = griddata((map_e, map_MA), map_SNR, (prior_e, prior_MA), method='linear')
@@ -234,16 +234,16 @@ def get_param_samples(harm_SNRs, prior_e, prior_MA, map_e, map_MA, map_SNR, two_
     else:
         point_MA = (np.angle(harm_SNRs[1])-np.angle(harm_SNRs[0]))%(2*np.pi)
         point_SNR = np.abs(harm_SNRs[1])/np.abs(harm_SNRs[0])
-    param_samples = {'samples': {'e': samples_e, 'MA': samples_MA, 'SNR': samples_SNR},
-                     'prior': {'e': prior_e, 'MA': prior_MA, 'SNR': prior_SNR},
+    param_samples = {'samples': {'ecc10': samples_e, 'MA': samples_MA, 'SNR': samples_SNR},
+                     'prior': {'ecc10': prior_e, 'MA': prior_MA, 'SNR': prior_SNR},
                      'likeL': {'MA': likeL_MA, 'SNR': likeL_SNR},
                      'SNR': {'MA': point_MA, 'SNR': point_SNR}}
-             
+
     return param_samples
 
 def create_min_max_interp(data, chirp, key):
     """
-    Create interpolation objects which give the min and max ecc value for 
+    Create interpolation objects which give the min and max ecc value for
     a given match value on line of degeneracy.
 
     Parameters:
@@ -271,15 +271,15 @@ def fid_e2zero_ecc_chirp(fid_e, scaling_norms=[10, 0.035]):
 
     Parameters:
         fid_e: Fiducial eccentricity.
-        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used 
+        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used
         to normalise relationship.
 
     Returns:
         zero_ecc_chirp: Non-eccentric chirp mass.
     """
-    
+
     zero_ecc_chirp = fid_e**(6/5)*scaling_norms[0]/(scaling_norms[1]**(6/5))
-    
+
     return zero_ecc_chirp
 
 def zero_ecc_chirp2fid_e(zero_ecc_chirp, scaling_norms=[10, 0.035]):
@@ -288,20 +288,20 @@ def zero_ecc_chirp2fid_e(zero_ecc_chirp, scaling_norms=[10, 0.035]):
 
     Parameters:
         zero_ecc_chirp: Non-eccentric chirp mass.
-        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used 
+        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used
         to normalise relationship.
 
     Returns:
         fid_e: Fiducial eccentricity.
     """
-    
+
     fid_e = zero_ecc_chirp**(5/6)*scaling_norms[1]/(scaling_norms[0]**(5/6))
-    
+
     return fid_e
 
 def scaled_2D_interps(data, key):
     """
-    Create interpolation objects which give the min and max match value at 
+    Create interpolation objects which give the min and max match value at
     arbitrary chirp mass and point in parameter space on line of degeneracy.
     These are normalised to account for different fiducial eccentricities.
 
@@ -319,7 +319,7 @@ def scaled_2D_interps(data, key):
     fid_e_vals_arr = []
 
     common_e_vals = np.arange(0, 1, 0.001)
-    
+
     # Loop over each chirp mass grid to get all max/min match values
     for chirp in data.keys():
 
@@ -329,20 +329,20 @@ def scaled_2D_interps(data, key):
         max_vals = max_interp(common_e_vals)
         min_vals = min_interp(common_e_vals)
         non_nan_inds = np.array(1 - np.isnan(max_vals+min_vals), dtype='bool')
-        
+
         # Normalise in both directions
         fid_e = data[chirp]['fid_params']['e']
         ecc_vals = common_e_vals/fid_e
         max_vals = max_vals/chirp
         min_vals = min_vals/chirp
-        
+
         # Add non-nan vals to interpolation data points
         max_vals_arr += list(max_vals[non_nan_inds])
         min_vals_arr += list(min_vals[non_nan_inds])
         ecc_vals_arr += list(ecc_vals[non_nan_inds])
         fid_e_vals = [fid_e]*np.sum(non_nan_inds)
         fid_e_vals_arr += fid_e_vals
-    
+
     # Create max/min interpolation objects
     max_interp = LinearNDInterpolator(list(zip(fid_e_vals_arr, ecc_vals_arr)), max_vals_arr)
     min_interp = LinearNDInterpolator(list(zip(fid_e_vals_arr, ecc_vals_arr)), min_vals_arr)
@@ -359,7 +359,7 @@ def find_ecc_range_samples(matches, chirp, interps, max_ecc=0.4, scaling_norms=[
         chirp: Chirp mass at zero eccentricity.
         interps: Interpolation objects used to interpolate to the min/max lines of the desired chirp mass.
         max_ecc: Maximum value of eccentricity.
-        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used 
+        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used
         to normalise relationship.
 
     Returns:
@@ -374,7 +374,7 @@ def find_ecc_range_samples(matches, chirp, interps, max_ecc=0.4, scaling_norms=[
     if len(interps) == 1:
         fid_e = zero_ecc_chirp2fid_e(chirp, scaling_norms=scaling_norms)
         max_interp_arr = interps[0](fid_e, ecc_range/fid_e)*chirp
-        min_interp_arr = interps[1](fid_e, ecc_range/fid_e)*chirp   
+        min_interp_arr = interps[1](fid_e, ecc_range/fid_e)*chirp
     else:
         max_interp, min_interp = interps
         max_interp_arr = max_interp(ecc_range)
@@ -395,7 +395,7 @@ def find_ecc_range_samples(matches, chirp, interps, max_ecc=0.4, scaling_norms=[
     ecc_arr[0][matches>np.max(max_interp_arr)] = ecc_range[np.argmax(max_interp_arr)]
     ecc_arr[1][matches<np.min(min_interp_arr)] = ecc_range[np.argmin(min_interp_arr)]
     ecc_arr[1][matches>np.max(min_interp_arr)] = 1
-    
+
     # Find eccentricities corresponding to max and min lines
     ecc_arr[0][ecc_arr[0]==5] = max_interp(matches[ecc_arr[0]==5])
     ecc_arr[1][ecc_arr[1]==5] = min_interp(matches[ecc_arr[1]==5])
@@ -404,7 +404,7 @@ def find_ecc_range_samples(matches, chirp, interps, max_ecc=0.4, scaling_norms=[
 
 def dist_CI(rv, x, CI=0.9):
     """
-    Find 90% confidence bounds (in SNR^2 space) with x% cutoff from lower end 
+    Find 90% confidence bounds (in SNR^2 space) with x% cutoff from lower end
     of distribution.
 
     Parameters:
@@ -443,7 +443,7 @@ def find_ecc_CI(CI_bounds, chirp, interps, max_ecc=0.4, scaling_norms=[10, 0.035
         chirp: Chirp mass at zero eccentricity.
         interps: Interpolation objects used to interpolate to the min/max lines of the desired chirp mass.
         max_ecc: Maximum value of eccentricity.
-        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used 
+        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used
         to normalise relationship.
 
     Returns:
@@ -461,7 +461,7 @@ def find_ecc_CI(CI_bounds, chirp, interps, max_ecc=0.4, scaling_norms=[10, 0.035
 
 def calc_weights(proposals, obs_SNR, df):
     """
-    Calculates the pdf value of an observed SNR value at proposed non central 
+    Calculates the pdf value of an observed SNR value at proposed non central
     parameter values. Used in rejection sampling to obtain samples on true SNR.
 
     Parameters:
@@ -522,7 +522,7 @@ def ecc2SNR(eccs, interps, max_ecc=0.4, max_match=1):
     upper_SNR[eccs>max_ecc] = max_match
     lower_SNR[eccs>max_ecc] = np.real(interps[1](max_ecc))
     SNR_samples = np.random.uniform(size=len(eccs))*(upper_SNR-lower_SNR)+lower_SNR
-        
+
     return SNR_samples
 
 def SNR2ecc(matches, chirp, interps, max_ecc=0.4, scaling_norms=[10, 0.035], upper_lenience=0, max_match=1):
@@ -534,7 +534,7 @@ def SNR2ecc(matches, chirp, interps, max_ecc=0.4, scaling_norms=[10, 0.035], upp
         chirp: Chirp mass at zero eccentricity.
         interps: Interpolation objects used to interpolate to the min/max lines of the desired chirp mass.
         max_ecc: Maximum value of eccentricity.
-        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used 
+        scaling_norms: Non-eccentric chirp mass and fiducial eccentricity used
         to normalise relationship.
         upper_lenience: Allow upper bound of eccentricity samples to be higher than max_ecc.
         max_match: Maximum match value.
@@ -630,16 +630,16 @@ def gen_zero_noise_data(zero_ecc_chirp, fid_e, ecc, f_low, f_match, MA_shift, to
         t_end = Data end time.
         fid_chirp: Fiducial chirp mass.
     """
-    
+
     # Get other required chirp masses along degeneracy line
     fid_chirp, chirp_mass = chirp_degeneracy_line(zero_ecc_chirp, np.array([fid_e, ecc]))
-    
+
     # Calculate distance for specified SNR
     s_d_test = gen_wf(f_low, ecc, chirp2total(chirp_mass, 2), 2, 4096, 'TEOBResumS', distance=1)
     psd_d_test = gen_psd(s_d_test, f_low)
     s_d_test_sigma = sigma(s_d_test.real(), psd_d_test, low_frequency_cutoff=f_match, high_frequency_cutoff=psd_d_test.sample_frequencies[-1])
     distance = np.sqrt(len(ifos))*s_d_test_sigma/total_SNR
-    
+
     # Calculate strain data (teobresums waveform) and psd
     s_f_2pi = f_low - shifted_f(f_low, ecc, chirp2total(chirp_mass, 2), 2)
     s_f = f_low - (MA_shift*s_f_2pi)
@@ -649,7 +649,7 @@ def gen_zero_noise_data(zero_ecc_chirp, fid_e, ecc, f_low, f_match, MA_shift, to
     _, s_teob = resize_wfs([fid_wf_len, s_teob])
     psd = gen_psd(s_teob, f_low)
     s_teob_f = s_teob.real().to_frequencyseries()
-    
+
     # Creates objects used in SNR functions
     data = {'H1': s_teob_f, 'L1': s_teob_f}
     psds = {'H1': psd, 'L1': psd}
@@ -697,31 +697,31 @@ def gen_ecc_samples(data, psds, t_start, t_end, fid_chirp, interps, max_ecc, n_g
     h0, h1, hn1, h2 = all_wfs[1:5]
     h0_f, h1_f, hn1_f, h2_f = [wf.real().to_frequencyseries() for wf in [h0, h1, hn1, h2]]
     h = {'h0': h0_f, 'h1': h1_f, 'h-1': hn1_f, 'h2': h2_f}
-    
+
     # Loop over detectors
     z = {}
     for ifo in ifos:
 
         # Add gaussian noise to data
         data[ifo] += frequency_noise_from_psd(psds[ifo], seed=seed)
-    
+
         # Normalise waveform modes
         h_perp = {}
         for key in h.keys():
             h_perp[key] = h[key] / sigma(h[key], psds[ifo], low_frequency_cutoff=f_match, high_frequency_cutoff=psds[ifo].sample_frequencies[-1])
-        
+
         # Calculate mode SNRs
         mode_SNRs, _ = calculate_mode_snr(data[ifo], psds[ifo], h_perp, t_start, t_end, f_match, h_perp.keys(), dominant_mode='h0')
         z[ifo] = mode_SNRs
-    
+
     # Calculate network SNRs
     rss_snr, _ = network_mode_snr(z, ifos, z[ifos[0]].keys(), dominant_mode='h0')
     if verbose:
         for mode in rss_snr:
             print(f'rho_{mode[1:]} = {rss_snr[mode]}')
             print(f'rho_{mode[1:]} angle = {np.angle(z[ifos[0]][mode])}')
-            
-    
+
+
     # Draw SNR samples and convert to eccentricity samples
     if 'pc' in match_key:
         assert len(ifos) == 1
@@ -750,15 +750,15 @@ def gen_ecc_samples(data, psds, t_start, t_end, fid_chirp, interps, max_ecc, n_g
     else:
         match_samples = ncx2_samples
     ecc_samples = SNR2ecc(match_samples, zero_ecc_chirp, interps, max_ecc=max_ecc, scaling_norms=[fid_chirp, fid_e], upper_lenience=upper_lenience, max_match=max_match)
-    
+
     # Estimate 90% confidence bounds on SNR
     rv = ncx2(2, num_sqrd)
     h1_CI_bounds = dist_min_CI(rv)
     h1_h0_CI_bounds = h1_CI_bounds/rss_snr['h0']
-    
+
     # Estimate 90% eccentric CI
     ecc_CI_bounds = find_ecc_CI(h1_h0_CI_bounds, zero_ecc_chirp, interps, max_ecc=max_ecc, scaling_norms=[fid_chirp, fid_e])
-    
+
     # Output time taken
     end = time.time()
     if verbose:

@@ -234,8 +234,8 @@ def get_param_samples(harm_SNRs, prior_e, prior_MA, map_e, map_MA, map_SNR, two_
     else:
         point_MA = (np.angle(harm_SNRs[1])-np.angle(harm_SNRs[0]))%(2*np.pi)
         point_SNR = np.abs(harm_SNRs[1])/np.abs(harm_SNRs[0])
-    param_samples = {'samples': {'e': samples_e, 'MA': samples_MA, 'SNR': samples_SNR},
-                     'prior': {'e': prior_e, 'MA': prior_MA, 'SNR': prior_SNR},
+    param_samples = {'samples': {'ecc10': samples_e, 'MA': samples_MA, 'SNR': samples_SNR},
+                     'prior': {'ecc10': prior_e, 'MA': prior_MA, 'SNR': prior_SNR},
                      'likeL': {'MA': likeL_MA, 'SNR': likeL_SNR},
                      'SNR': {'MA': point_MA, 'SNR': point_SNR}}
 
