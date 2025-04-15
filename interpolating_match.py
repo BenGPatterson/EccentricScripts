@@ -147,9 +147,9 @@ def SNR_weights(harm_SNRs, prior_MA, prior_SNR, two_ecc_harms=True):
     Get weights of each prior sample based on harmonic SNR information.
 
     Parameters:
-        harm_SNRs: Dicitonary of complex SNRs of eccentric harmonics.
-        prior_e: Prior samples on eccentricity.
+        harm_SNRs: Dictionary of complex SNRs of eccentric harmonics.
         prior_MA: Prior samples on MA.
+        prior_SNR: Prior samples on SNR.
         two_ecc_harms: Whether to include two higher eccentric harmonics.
 
     Returns:
