@@ -142,7 +142,7 @@ def get_param_samples(harm_SNRs, prior_e, prior_MA, map_e, map_MA, map_SNR, two_
 
     return param_samples
 
-def get_peak_e_MA(base_params, fid_params, param_samples):
+def get_peak_e_MA(base_params, fid_params, param_samples, param_dirs):
     """
     Identifies peak point on degeneracy line as well as peak MA by computing the kde
     of both parameters.
@@ -151,6 +151,7 @@ def get_peak_e_MA(base_params, fid_params, param_samples):
         base_params: Dictionary of non-eccentric peak point.
         fid_params: Dictionary of fiducial point used to define degeneracy line.
         param_samples: Samples along degeneracy line.
+        param_dirs: Parameter directions.
 
     Returns:
         peak_dict: Dictionary of eccentric peak point.
@@ -170,12 +171,10 @@ def get_peak_e_MA(base_params, fid_params, param_samples):
     MA_peak = MA_arr[np.argmax(MA_kde_dens)]
 
     # Build peak dictionary
-    base_dict = base_params
-    fid_dict = fid_params
-    degen_dist = (e2_peak-base_dict['ecc10sqrd'])/(fid_dict['ecc10sqrd']-base_dict['ecc10sqrd'])
+    degen_dist = (e2_peak-base_params['ecc10sqrd'])/(fid_params['ecc10sqrd']-base_params['ecc10sqrd'])
     peak_dict = {'MA': MA_peak}
-    for key in list(fid_params.keys()):
-        peak_dict[key] = degen_dist*(fid_dict[key]-base_dict[key])+base_dict[key]
+    for key in param_dirs:
+        peak_dict[key] = degen_dist*(fid_params[key]-base_params[key])+base_params[key]
 
     return peak_dict
 
