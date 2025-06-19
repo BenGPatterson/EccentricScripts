@@ -1,189 +1,16 @@
 import numpy as np
-from scipy.interpolate import griddata, interpn
-from scipy.stats import gaussian_kde, multivariate_normal
-from pycbc.filter import sigma
-from pesummary.gw.conversions.mass import component_masses_from_mchirp_q, q_from_eta
+from scipy.interpolate import interpn
+from scipy.stats import gaussian_kde
 from pesummary.core.reweight import rejection_sampling
-from simple_pe.waveforms import calc_f_gen, two_ecc_harms_SNR, make_waveform, calculate_mode_snr
+from simple_pe.waveforms import two_ecc_harms_SNR, make_waveform, calculate_mode_snr
 from simple_pe.param_est import result, pe
-from calcwf import match_hn
 
-def create_map(match_grid, two_ecc_harms=True, map_len=151):
+def find_peak_MA(data, peak_dict, f_low, psd, n_ecc_harms, n_ecc_gen, two_ecc_harms=True):
     """
-    Creates arrays of eccentricity, MA, and SNR to allow for interpolation
-    from any two parameters to a third.
+    Generates harmonics at peak, and thus calculates peak MA.
 
     Parameters:
-        match_grid: Object containing match data.
-        two_ecc_harms: Whether to include two higher eccentric harmonics.
-        map_len: Number of points in eccentricity and MA dimensions.
-
-    Returns:
-        map_e: Eccentricity mapping array.
-        map_MA: MA mapping array.
-        map_SNR: SNR mapping array.
-    """
-
-    # Get sparse mapping points
-    e_vals = match_grid['metadata']['degen_params']['ecc10']
-    MA_vals = match_grid['metadata']['MA_vals']
-    sparse_e = np.tile(np.repeat(e_vals, len(MA_vals)),3)
-    if two_ecc_harms:
-        sparse_SNR = np.tile(match_grid['h1_h-1_h0_pc'].flatten(), 3)
-        MA_merger = (match_grid['h1_h-1_h0_pc_phase']).flatten()%(2*np.pi)
-    else:
-        sparse_SNR = np.tile(match_grid['h1_h0'].flatten(), 3)
-        MA_merger = (match_grid['h1_phase']-match_grid['h0_phase']).flatten()%(2*np.pi)
-    sparse_MA = np.concatenate((MA_merger-2*np.pi, MA_merger, MA_merger+2*np.pi))
-
-    # Get dense mapping points
-    map_e = np.tile(np.linspace(np.min(e_vals), np.max(e_vals), map_len), map_len)
-    map_MA = np.repeat(np.linspace(0, 2*np.pi, map_len), map_len)
-    map_SNR = griddata((sparse_e, sparse_MA), sparse_SNR, (map_e, map_MA), method='linear')
-
-    return map_e, map_MA, map_SNR
-
-def SNR_weights(harm_SNRs, prior_MA, prior_SNR, two_ecc_harms=True):
-    """
-    Get weights of each prior sample based on harmonic SNR information.
-
-    Parameters:
-        harm_SNRs: Dictionary of complex SNRs of eccentric harmonics.
-        prior_MA: Prior samples on MA.
-        prior_SNR: Prior samples on SNR.
-        two_ecc_harms: Whether to include two higher eccentric harmonics.
-
-    Returns:
-        weights: Weight of each prior sample.
-        likeL_MA: MA of likelihood samples.
-        likeL_SNR: SNR of likelihood samples.
-    """
-
-    # Convert prior samples to x and y coordinates
-    prior_x = np.real(prior_SNR*np.exp(1j*prior_MA))
-    prior_y = np.imag(prior_SNR*np.exp(1j*prior_MA))
-
-    n = 10**5
-    if two_ecc_harms:
-
-        # Draw samples on combined complex SNR
-        s_1_x, s_1_y = np.random.normal(np.real(harm_SNRs[1]), 1, n), np.random.normal(np.imag(harm_SNRs[1]), 1, n)
-        s_1 = s_1_x + 1j*s_1_y
-        s_n1_x, s_n1_y = np.random.normal(np.real(harm_SNRs[-1]), 1, n), np.random.normal(np.imag(harm_SNRs[-1]), 1, n)
-        s_n1 = s_n1_x + 1j*s_n1_y
-        s_1n1_SNR, s_1n1_MA = two_ecc_harms_SNR({0: np.full(n, np.abs(harm_SNRs[0])), 1: np.abs(s_1), -1: np.abs(s_n1)},
-                                                {0: np.full(n, np.angle(harm_SNRs[0])), 1: np.angle(s_1), -1: np.angle(s_n1)})
-        s_1n1 = s_1n1_SNR*np.exp(1j*s_1n1_MA)
-        s_1n1_x, s_1n1_y = np.real(s_1n1), np.imag(s_1n1)
-
-        # Compute combined kde at points on 2d grid
-        kde_samples = np.array([s_1n1_x, s_1n1_y])
-        kernel = gaussian_kde(kde_samples)
-
-        # Draw weights from interpolated kde
-        kde_x, kde_y = np.mgrid[np.min(s_1n1_x):np.max(s_1n1_x):51j, np.min(s_1n1_y):np.max(s_1n1_y):51j]
-        kde_z = kernel(np.vstack([kde_x.flatten(), kde_y.flatten()])).reshape(kde_x.shape)
-        weights = griddata((kde_x.flatten(), kde_y.flatten()), kde_z.flatten(), (prior_x.flatten(), prior_y.flatten()), method='linear', fill_value=0)
-
-    else:
-
-        # If only first higher harmonic, weights drawn from gaussian pdf
-        h1_MA = np.angle(harm_SNRs[1]) - np.angle(harm_SNRs[0])
-        h1_x = np.real(np.abs(harm_SNRs[1])*np.exp(1j*h1_MA))
-        h1_y = np.imag(np.abs(harm_SNRs[1])*np.exp(1j*h1_MA))
-        rv = multivariate_normal(mean=[h1_x, h1_y], cov=[1,1])
-        weights = rv.pdf(np.array([prior_x*np.abs(harm_SNRs[0]), prior_y*np.abs(harm_SNRs[0])]).T)
-
-        # Draw samples from gaussian if return_likeL
-        s_1n1_xy = rv.rvs(size=n)/np.abs(harm_SNRs[0])
-        s_1n1 = s_1n1_xy[:,0]+1j*s_1n1_xy[:,1]
-
-    # Normalise
-    weights /= np.max(weights)
-
-    return weights, np.angle(s_1n1)%(2*np.pi), np.abs(s_1n1)
-
-def get_param_samples(harm_SNRs, prior_e, prior_MA, map_e, map_MA, map_SNR, two_ecc_harms=True):
-    """
-    Get parameter samples by combining prior with harmonic SNR information.
-
-    Parameters:
-        harm_SNRs: Dictionary of complex SNRs of eccentric harmonics.
-        prior_e: Prior samples on eccentricity.
-        prior_MA: Prior samples on MA.
-        map_e: Eccentricity mapping array.
-        map_MA: MA mapping array.
-        map_SNR: SNR mapping array.
-        two_ecc_harms: Whether to include two higher eccentric harmonics.
-
-    Returns:
-        param_samples: Dictionary with sample information.
-    """
-
-    # Convert prior samples to SNR space
-    prior_SNR = griddata((map_e, map_MA), map_SNR, (prior_e, prior_MA), method='linear')
-
-    # Get weights based on SNR information
-    weights, likeL_MA, likeL_SNR = SNR_weights(harm_SNRs, prior_MA, prior_SNR, two_ecc_harms=two_ecc_harms)
-    proposals = weights>np.random.rand(len(weights))
-    samples_e, samples_MA, samples_SNR = prior_e[proposals], prior_MA[proposals], prior_SNR[proposals]
-
-    # Build param samples dictionary
-    if two_ecc_harms:
-            point_SNR, point_MA = two_ecc_harms_SNR({i: np.abs(harm_SNRs[i]) for i in [0,1,-1]},
-                                                    {i: np.angle(harm_SNRs[i]) for i in [0,1,-1]})
-    else:
-        point_MA = (np.angle(harm_SNRs[1])-np.angle(harm_SNRs[0]))%(2*np.pi)
-        point_SNR = np.abs(harm_SNRs[1])/np.abs(harm_SNRs[0])
-    param_samples = {'samples': {'ecc10': samples_e, 'MA': samples_MA, 'SNR': samples_SNR},
-                     'prior': {'ecc10': prior_e, 'MA': prior_MA, 'SNR': prior_SNR},
-                     'likeL': {'MA': likeL_MA, 'SNR': likeL_SNR},
-                     'SNR': {'MA': point_MA, 'SNR': point_SNR}}
-
-    return param_samples
-
-def get_peak_e_MA(base_params, fid_params, param_samples, param_dirs):
-    """
-    Identifies peak point on degeneracy line as well as peak MA by computing the kde
-    of both parameters.
-
-    Parameters:
-        base_params: Dictionary of non-eccentric peak point.
-        fid_params: Dictionary of fiducial point used to define degeneracy line.
-        param_samples: Samples along degeneracy line.
-        param_dirs: Parameter directions.
-
-    Returns:
-        peak_dict: Dictionary of eccentric peak point.
-    """
-
-    # Build kde and find peak for e
-    e2_kernel = gaussian_kde(param_samples['samples']['ecc10']**2)
-    e2_arr = np.linspace(0, np.max(param_samples['samples']['ecc10'])**2, 10**3)
-    e2_kde_dens = e2_kernel(e2_arr)
-    e2_peak = e2_arr[np.argmax(e2_kde_dens)]
-
-    # Build kde and find peak for MA
-    MA_kde_builders = np.concatenate([param_samples['samples']['MA'], param_samples['samples']['MA']+2*np.pi, param_samples['samples']['MA']-2*np.pi])
-    MA_kernel = gaussian_kde(MA_kde_builders, bw_method=0.01)
-    MA_arr = np.linspace(0,2*np.pi,10**3,endpoint=False)
-    MA_kde_dens = MA_kernel(MA_arr)
-    MA_peak = MA_arr[np.argmax(MA_kde_dens)]
-
-    # Build peak dictionary
-    degen_dist = (e2_peak-base_params['ecc10sqrd'])/(fid_params['ecc10sqrd']-base_params['ecc10sqrd'])
-    peak_dict = {'MA': MA_peak}
-    for key in param_dirs:
-        peak_dict[key] = degen_dist*(fid_params[key]-base_params[key])+base_params[key]
-
-    return peak_dict
-
-def recal_MA(all_matches, peak_dict, f_low, psd, n_ecc_harms, n_ecc_gen, two_ecc_harms=True):
-    """
-    Renormalises peak value of mean anomaly to new set of harmonics.
-
-    Parameters:
-        all_matches: Grid of matches along degeneracy line.
+        data: Data.
         peak_dict: Dictionary of eccentric peak point.
         f_low: Initial frequency.
         psd: Power spectral density.
@@ -194,74 +21,26 @@ def recal_MA(all_matches, peak_dict, f_low, psd, n_ecc_harms, n_ecc_gen, two_ecc
     Returns:
         peak_dict: Dictionary of eccentric peak point.
         wf_dict: Dictionary of harmonics at eccentric peak point.
+        peak_SNRs: Dictionary of SNRs in each harmonic
     """
 
-    # Calculate harmonic ordering
-    harm_ids = [0,1]
-    for i in range(2,n_ecc_harms):
-        if harm_ids[-1] > 0:
-            harm_ids.append(-harm_ids[-1])
-        else:
-            harm_ids.append(-harm_ids[-1]+1)
-
     # Generate harmonics at peak
-    peak_dict['mass_ratio'] = q_from_eta(peak_dict['symmetric_mass_ratio'])
-    peak_dict['inverted_mass_ratio'] = 1/peak_dict['mass_ratio']
-    peak_dict['total_mass'] = np.sum(component_masses_from_mchirp_q(peak_dict['chirp_mass'], peak_dict['mass_ratio']), axis=0)
     peak_dict['distance'] = 1
     wf_dict = make_waveform(peak_dict, psd.delta_f, f_low, len(psd), approximant='TEOBResumS-Dali-Harms',
                             n_ecc_harms=n_ecc_harms, n_ecc_gen=n_ecc_gen)
-    wf_hjs = [wf_dict[ind].to_timeseries() for ind in harm_ids]
 
-    # Test three MA values from gridded matches
-    dist_to_peak = np.abs(all_matches['metadata']['degen_params']['ecc10sqrd']-peak_dict['ecc10sqrd'])
-    idx = np.argpartition(dist_to_peak, 3)[:3]
-    f_gen = calc_f_gen(f_low, n_ecc_harms)
-    MA_diff_cplx = 0j
-    for pos in idx:
-        params = {key: all_matches['metadata']['degen_params'][key][pos] for key in all_matches['metadata']['degen_params'].keys()}
-        params['distance'] = 1
-        h = make_waveform(params, psd.delta_f, f_low, len(psd), approximant='TEOBResumS-Dali')
-        match_cplx = match_hn(wf_hjs, h.to_timeseries(), f_gen, psd=psd, f_match=f_low)
-        if two_ecc_harms:
-            MA_old = all_matches['h1_h-1_h0_pc_phase'][pos][0]
-            _, MA_new = two_ecc_harms_SNR({0: np.abs(match_cplx[0]), 1: np.abs(match_cplx[1]), -1: np.abs(match_cplx[2])},
-                                          {0: np.angle(match_cplx[0]), 1: np.angle(match_cplx[1]), -1: np.angle(match_cplx[2])})
-        else:
-            MA_old = (all_matches['h1_phase'][pos][0]-all_matches['h0_phase'][pos][0])%(2*np.pi)
-            MA_new = (np.angle(match_cplx[1])-np.angle(match_cplx[0]))%(2*np.pi)
-        MA_diff_cplx += np.exp(1j*(MA_new - MA_old))
-    MA_diff = np.angle(MA_diff_cplx)
+    # Match harmonics to data and thus estimate peak MA
+    peak_SNRs, _ = calculate_mode_snr(data, psd, wf_dict, data.sample_times[0],
+                                   data.sample_times[-1], f_low, wf_dict.keys(),
+                                   dominant_mode=0, subsample_interpolation=False)
+    if two_ecc_harms:
+        _ , MA = two_ecc_harms_SNR({k: np.abs(peak_SNRs[k]) for k in [0, 1, -1]},
+                                   {k: np.angle(peak_SNRs[k]) for k in [0, 1, -1]})
+    else:
+        MA = (np.angle(peak_SNRs[1])-np.angle(peak_SNRs[0])) % (2*np.pi)
+    peak_dict['MA'] = MA
 
-    # Return calibrated peak MA and harmonics
-    peak_dict['recal_MA'] = (peak_dict['MA']+MA_diff)%(2*np.pi)
-    return peak_dict, wf_dict
-
-def get_harm_data_snr(data, wf_dict, f_low, psd):
-    """
-    Calculates SNR in each harmonic in the data.
-
-    Parameters:
-        data: Data.
-        wf_dict: Dictionary of harmonics.
-        f_low: Initial frequency.
-        psd: Power spectral density.
-
-    Returns:
-        mode_SNRs: SNR in each harmonic.
-    """
-
-    # Endure harmonics are normalised
-    harm_dict = {}
-    for key in wf_dict.keys():
-        harm_dict[key] = wf_dict[key] / sigma(wf_dict[key], psd, low_frequency_cutoff=f_low,
-                                              high_frequency_cutoff=psd.sample_frequencies[-1])
-
-    # Get SNR in each harmonic
-    mode_SNRs, _ = calculate_mode_snr(data, psd, harm_dict, data.sample_times[0],
-                                      data.sample_times[-1], f_low, harm_dict.keys(), dominant_mode=0)
-
-    return mode_SNRs
+    return peak_dict, wf_dict, peak_SNRs
 
 def create_pe_result(peak_dict, SNRs, f_low, psd, ifos):
     """
@@ -369,7 +148,7 @@ def calc_ecc_SNR_grid(pe_result, peak_dict, wf_dict, f_low, psd, two_ecc_harms=T
                         psd=psd,
                         f_low=f_low,
                         interp_points=interp_points,
-                        MA=peak_dict['recal_MA'],
+                        MA=peak_dict['MA'],
                         ecc_harms=wf_dict,
                         two_ecc_harms=two_ecc_harms,
                         ncpus=ncpus
@@ -418,4 +197,4 @@ def interpolate_ecc_SNR_samples(pe_result, ecc_SNR_grid, SNRs, two_ecc_harms=Tru
     ecc_SNR_weights_norm = ecc_SNR_weights/np.max(ecc_SNR_weights)
     samples_ecc_cut = samples[ecc_SNR_weights_norm>=np.random.rand(len(ecc_SNR_weights))]
 
-    return samples_ecc_cut
+    return samples_ecc_cut, ecc_SNR_samples, ecc_SNR_weights_norm
