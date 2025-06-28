@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.interpolate import interpn
+from scipy.interpolate import interp1d
 from scipy.stats import gaussian_kde
 from pesummary.core.reweight import rejection_sampling
 from simple_pe.waveforms import two_ecc_harms_SNR, make_waveform, calculate_mode_snr
@@ -141,18 +141,16 @@ def calc_ecc_SNR_grid(pe_result, peak_dict, wf_dict, f_low, psd, two_ecc_harms=T
         ecc_SNR_grid: Interpolant grid.
     """
 
-    interp_points = 5
-    eccentricity_directions = ['chirp_mass', 'ecc10sqrd', 'symmetric_mass_ratio', 'chi_eff']
+    interp_points = 25
     ecc_SNR_grid = pe_result.calculate_ecc_SNR_grid(
-                        interp_directions=eccentricity_directions,
-                        psd=psd,
-                        f_low=f_low,
-                        interp_points=interp_points,
-                        MA=peak_dict['MA'],
-                        ecc_harms=wf_dict,
-                        two_ecc_harms=two_ecc_harms,
-                        ncpus=ncpus
-                    )
+        psd=psd,
+        f_low=f_low,
+        interp_points=interp_points,
+        MA=peak_dict['MA'],
+        ecc_harms=wf_dict,
+        two_ecc_harms=two_ecc_harms,
+        ncpus=ncpus
+        )
     return ecc_SNR_grid
 
 def interpolate_ecc_SNR_samples(pe_result, ecc_SNR_grid, SNRs, two_ecc_harms=True):
@@ -170,11 +168,11 @@ def interpolate_ecc_SNR_samples(pe_result, ecc_SNR_grid, SNRs, two_ecc_harms=Tru
     """
 
     # Interpolate samples to ecc SNR from 5x5x5x5 grid
-    interp_pts = ecc_SNR_grid[0][1].copy()
-    interp_pts[1] = np.sqrt(interp_pts[1])
+    interp_pts = np.sqrt(ecc_SNR_grid[1]['ecc10sqrd'].copy())
     samples = pe.SimplePESamples(pe_result.samples_dict)
     samples.generate_ecc()
-    ecc_SNR_samples = interpn(interp_pts, ecc_SNR_grid[0][0], np.array([samples[k] for k in ['chirp_mass', 'ecc10', 'symmetric_mass_ratio', 'chi_eff']]).T)
+    interp_e_SNR = interp1d(interp_pts, ecc_SNR_grid[0])
+    ecc_SNR_samples = interp_e_SNR(np.sqrt(samples['ecc10sqrd']))
 
     if two_ecc_harms:
         # Compute kde on peak SNR with two higher harmonics
