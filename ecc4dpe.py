@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.interpolate import interp1d
-from scipy.stats import gaussian_kde
+from scipy.stats import ncx2
 from pesummary.core.reweight import rejection_sampling
 from simple_pe.waveforms import two_ecc_harms_SNR, make_waveform, calculate_mode_snr
 from simple_pe.param_est import result, pe
@@ -174,22 +174,16 @@ def interpolate_ecc_SNR_samples(pe_result, ecc_SNR_grid, SNRs, two_ecc_harms=Tru
     interp_e_SNR = interp1d(interp_pts, ecc_SNR_grid[0])
     ecc_SNR_samples = interp_e_SNR(np.sqrt(samples['ecc10sqrd']))
 
+    # Compute weights for each sample
     if two_ecc_harms:
-        # Compute kde on peak SNR with two higher harmonics
-        n = 10**5
-        s_1 = np.random.normal(np.real(SNRs[1]), 1, n) + 1j*np.random.normal(np.imag(SNRs[1]), 1, n)
-        s_n1 = np.random.normal(np.real(SNRs[-1]), 1, n) + 1j*np.random.normal(np.imag(SNRs[-1]), 1, n)
-        s_1n1_abs, s_1n1_phase = two_ecc_harms_SNR({0: np.full(n, np.abs(SNRs[0])), 1: np.abs(s_1), -1: np.abs(s_n1)},
-                                                   {0: np.full(n, np.angle(SNRs[0])), 1: np.angle(s_1), -1: np.angle(s_n1)})
-        s_1n1 = s_1n1_abs*np.exp(1j*s_1n1_phase)
-        kde_samples = np.array([np.real(s_1n1), np.imag(s_1n1)])
-        kernel = gaussian_kde(kde_samples)
-        ecc_SNR_weights = kernel([np.real(ecc_SNR_samples), np.imag(ecc_SNR_samples)])
+        df = 3
     else:
-        # Calculate weights with one higher harmonic using pdf
-        real_arg = -0.5*(np.abs(SNRs[0])*(np.real(ecc_SNR_samples)-np.real(SNRs[1]/SNRs[0])))**2
-        imag_arg = -0.5*(np.abs(SNRs[0])*(np.imag(ecc_SNR_samples)-np.imag(SNRs[1]/SNRs[0])))**2
-        ecc_SNR_weights = np.exp(real_arg)*np.exp(imag_arg)
+        df = 2
+    abs_ecc_SNR = np.abs(ecc_SNR_samples)*np.abs(SNRs[0])
+    abs_meas_SNR, _ = two_ecc_harms_SNR({k: np.abs(SNRs[k]) for k in [0, 1, -1]},
+                                        {k: np.angle(SNRs[k]) for k in [0, 1, -1]})
+    abs_meas_SNR *= np.abs(SNRs[0])
+    ecc_SNR_weights = ncx2.pdf(abs_meas_SNR**2, df, abs_ecc_SNR**2)
 
     # Perform rejection sampling
     ecc_SNR_weights_norm = ecc_SNR_weights/np.max(ecc_SNR_weights)
